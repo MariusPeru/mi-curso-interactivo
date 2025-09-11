@@ -29,6 +29,7 @@
         .prose blockquote { border-left: 4px solid #d1d5db; padding-left: 1em; margin-left: 0; font-style: italic; color: #4b5563; }
         .prose hr { margin-top: 2em; margin-bottom: 2em; }
         .chapter-btn.active { background-color: #3b82f6; color: white; }
+        .delete-chapter-btn.active { background-color: #1d4ed8; } /* darker blue for active delete */
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
@@ -102,7 +103,7 @@
 
             <div id="results-container" class="space-y-8">
                 <div id="mcq-section" class="hidden"><h2 class="text-2xl font-bold mb-4">📝 Preguntas con Alternativas</h2><div id="mcq-container" class="space-y-4"></div></div>
-                <div id="tf-section" class="hidden"><h2 class="text-2xl font-bold mb-4">✔️/❌ Verdadero / Falso</h2><div id="tf-container" class="space-y-4"></div></div>
+                <div id="tf-section" class="hidden"><h2 class="text-2xl font-bold mb-4">✔️ o ❌ Verdadero o Falso</h2><div id="tf-container" class="space-y-4"></div></div>
                 <div id="quiz-controls" class="hidden text-center mt-8 space-x-4">
                     <button id="check-answers-button" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-full">Comprobar Respuestas</button>
                     <button id="retry-button" class="hidden bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-full">Intentar de Nuevo</button>
@@ -152,6 +153,17 @@
                 <div class="space-x-4">
                     <button id="cancel-reset-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-full">Cancelar</button>
                     <button id="confirm-reset-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-full">Sí, Empezar de Nuevo</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="delete-chapter-confirm-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto p-6 text-center">
+                <h3 class="text-xl font-bold mb-4">Eliminar Capítulo</h3>
+                <p class="mb-6">¿Estás seguro de que quieres eliminar este capítulo? Todo su contenido y progreso se perderán permanentemente.</p>
+                <div class="space-x-4">
+                    <button id="cancel-delete-chapter-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-full">Cancelar</button>
+                    <button id="confirm-delete-chapter-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-full">Sí, Eliminar</button>
                 </div>
             </div>
         </div>
@@ -229,6 +241,9 @@
         const apiKeyInput = document.getElementById('api-key-input');
         const saveApiKeyBtn = document.getElementById('save-api-key-btn');
         const cancelApiKeyBtn = document.getElementById('cancel-api-key-btn');
+        const deleteChapterConfirmModal = document.getElementById('delete-chapter-confirm-modal');
+        const confirmDeleteChapterBtn = document.getElementById('confirm-delete-chapter-btn');
+        const cancelDeleteChapterBtn = document.getElementById('cancel-delete-chapter-btn');
 
         // State
         let courseTitle = '';
@@ -237,6 +252,7 @@
         let currentCardIndex = 0;
         let apiKey = localStorage.getItem('gemini-api-key');
         let apiCallQueue = null;
+        let chapterToDeleteId = null;
 
         // --- App Initialization ---
         startCourseButton.addEventListener('click', () => {
@@ -274,6 +290,7 @@
             startScreen.classList.add('hidden');
             mainApp.classList.remove('hidden');
             if (courseData.length > 0) {
+                sortCourseData();
                 updateChapterNavigation();
                 displayChapter(courseData[0].id);
                 progressSection.classList.remove('hidden');
@@ -319,6 +336,7 @@
                     quizAttempt: null
                 };
                 courseData.push(newChapter);
+                sortCourseData();
                 currentChapterId = chapterId;
                 updateChapterNavigation();
                 displayChapter(chapterId);
@@ -455,15 +473,45 @@
         }
         
         // --- Navigation and UI Helpers ---
+        function sortCourseData() {
+            const getSortNumber = (title) => {
+                const match = title.match(/^(\d+)/);
+                return match ? parseInt(match[1], 10) : Infinity;
+            };
+            courseData.sort((a, b) => {
+                const numA = getSortNumber(a.title);
+                const numB = getSortNumber(b.title);
+                if (numA !== numB) return numA - numB;
+                return a.title.localeCompare(b.title); // Fallback for non-numeric or same-number titles
+            });
+        }
+        
         function updateChapterNavigation() {
             chapterNav.innerHTML = '';
             courseData.forEach(chapter => {
+                const container = document.createElement('div');
+                container.className = 'flex items-center group';
+
                 const button = document.createElement('button');
                 button.textContent = chapter.title;
                 button.dataset.chapterId = chapter.id;
-                button.className = `chapter-btn py-2 px-4 rounded-full text-sm font-semibold transition-colors duration-200 ${chapter.id === currentChapterId ? 'active' : 'bg-gray-200 hover:bg-gray-300'}`;
+                button.className = `chapter-btn py-2 px-4 rounded-l-full text-sm font-semibold transition-colors duration-200 ${chapter.id === currentChapterId ? 'active' : 'bg-gray-200 hover:bg-gray-300'}`;
                 button.addEventListener('click', () => displayChapter(chapter.id));
-                chapterNav.appendChild(button);
+                
+                const deleteBtn = document.createElement('button');
+                deleteBtn.innerHTML = '&times;';
+                deleteBtn.dataset.chapterId = chapter.id;
+                deleteBtn.className = `delete-chapter-btn py-2 px-3 rounded-r-full text-sm font-bold transition-colors duration-200 ${chapter.id === currentChapterId ? 'active bg-blue-700 hover:bg-red-600 text-white' : 'bg-gray-300 hover:bg-red-500 text-gray-700 hover:text-white'}`;
+                deleteBtn.title = `Eliminar capítulo: ${chapter.title}`;
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevent chapter navigation
+                    chapterToDeleteId = e.currentTarget.dataset.chapterId;
+                    deleteChapterConfirmModal.classList.remove('hidden');
+                });
+                
+                container.appendChild(button);
+                container.appendChild(deleteBtn);
+                chapterNav.appendChild(container);
             });
             chapterNavSection.classList.remove('hidden');
         }
@@ -488,7 +536,7 @@
              }
         }
 
-        // --- Import/Export/Reset ---
+        // --- Import/Export/Reset/Delete ---
         exportButton.addEventListener('click', () => {
             if (courseData.length === 0) { alert("No hay nada que exportar todavía."); return; }
             const dataStr = JSON.stringify({ title: courseTitle, data: courseData });
@@ -509,6 +557,41 @@
         confirmResetBtn.addEventListener('click', () => {
             window.location.reload();
         });
+
+        cancelDeleteChapterBtn.addEventListener('click', () => {
+            deleteChapterConfirmModal.classList.add('hidden');
+            chapterToDeleteId = null;
+        });
+
+        confirmDeleteChapterBtn.addEventListener('click', () => {
+            if (chapterToDeleteId) {
+                deleteChapter(chapterToDeleteId);
+            }
+            deleteChapterConfirmModal.classList.add('hidden');
+            chapterToDeleteId = null;
+        });
+
+        function deleteChapter(chapterId) {
+            const chapterIndex = courseData.findIndex(c => c.id === chapterId);
+            if (chapterIndex > -1) {
+                courseData.splice(chapterIndex, 1);
+            }
+
+            if (courseData.length === 0) {
+                hideAllSections();
+                chapterNavSection.classList.add('hidden');
+                progressSection.classList.add('hidden');
+                currentChapterId = null;
+            } else {
+                if (currentChapterId === chapterId) {
+                    currentChapterId = courseData[0].id;
+                    displayChapter(currentChapterId);
+                } else {
+                    updateChapterNavigation();
+                }
+            }
+             updateProgressBar();
+        }
         
         // --- Progress Bar ---
         function updateProgressBar() {
@@ -647,7 +730,7 @@
             }
             updateProgressBar();
 
-            let summaryHtml = `<p class="font-bold text-lg">Resultados:</p><p>Alternativas: <span class="font-semibold">${mcqScore} / ${preguntasAlternativas.length}</span></p><p>Verdadero/Falso: <span class="font-semibold">${tfScore} / ${preguntasVF.length}</span></p>`;
+            let summaryHtml = `<p class="font-bold text-lg">Resultados:</p><p>Alternativas: <span class="font-semibold">${mcqScore} / ${preguntasAlternativas.length}</span></p><p>Verdadero o Falso: <span class="font-semibold">${tfScore} / ${preguntasVF.length}</span></p>`;
 
             if (totalScore >= 8) {
                 summaryHtml += `<p class="mt-2 text-green-600 font-semibold">¡Excelente! Has desbloqueado las explicaciones.</p>`;
