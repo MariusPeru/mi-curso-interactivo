@@ -382,6 +382,7 @@
 
             documentTitle.textContent = chapter.title;
             const converter = new showdown.Converter();
+            converter.setOption('tables', true);
             documentContentDiv.innerHTML = converter.makeHtml(chapter.markdownContent);
             documentViewerSection.classList.remove('hidden');
 
@@ -895,3 +896,4 @@
     </script>
 </body>
 </html>
+
