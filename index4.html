@@ -1,0 +1,1249 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Estudio con Gemini</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/showdown/2.1.0/showdown.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .flashcard { perspective: 1000px; }
+        .flashcard-inner { position: relative; width: 100%; height: 100%; transition: transform 0.6s; transform-style: preserve-3d; }
+        .flashcard.is-flipped .flashcard-inner { transform: rotateY(180deg); }
+        .flashcard-face { position: absolute; width: 100%; height: 100%; -webkit-backface-visibility: hidden; backface-visibility: hidden; display: flex; justify-content: center; align-items: center; padding: 0.75rem; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); text-align: center; font-size: 0.9rem; line-height: 1.3; }
+        .flashcard-front { background-color: #3b82f6; color: white; }
+        .flashcard-back { background-color: #f59e0b; color: #1f2937; transform: rotateY(180deg); }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .correct-answer { background-color: #dcfce7; }
+        .incorrect-answer { background-color: #fee2e2; }
+        .explanation { background-color: #f0f9ff; border-left: 4px solid #0ea5e9; padding: 0.75rem; margin-top: 0.75rem; font-size: 0.9rem; }
+        .prose h1, .prose h2, .prose h3, .prose h4 { color: #111827; font-weight: 600; margin-top: 1.25em; margin-bottom: 0.5em; }
+        .prose p { margin-top: 0.75em; margin-bottom: 0.75em; }
+        .prose ul { list-style-type: disc; padding-left: 1.5em; }
+        .prose strong { font-weight: 600; }
+        .prose blockquote { border-left: 4px solid #d1d5db; padding-left: 1em; margin-left: 0; font-style: italic; color: #4b5563; }
+        .prose hr { margin-top: 2em; margin-bottom: 2em; }
+        .prose table { width: 100%; border-collapse: collapse; }
+        .prose th, .prose td { border: 1px solid #d1d5db; padding: 8px; }
+        .prose th { background-color: #f3f4f6; font-weight: 600; }
+        .chapter-btn.active { background-color: #3b82f6; color: white; }
+        .delete-chapter-btn.active { background-color: #1d4ed8; }
+        #document-content { overflow-x: auto; }
+        #document-content table { border-collapse: collapse; min-width: 640px; }
+        #document-content th, #document-content td { white-space: nowrap; }
+</style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto max-w-4xl p-4 sm:p-6 md:p-8">
+        <header class="text-center mb-8">
+            <h1 id="main-header" class="text-3xl md:text-4xl font-bold text-gray-900">🧠 Generador de Material de Estudio</h1>
+            <p id="main-subheader" class="text-gray-600 mt-2">Sube tu primer capítulo para empezar un nuevo curso.</p>
+        </header>
+
+        <div id="main-app">
+            <div id="progress-section" class="hidden bg-white p-6 rounded-lg shadow-md mb-8">
+                <h2 class="text-xl font-semibold mb-4">Progreso de Dominio del Curso</h2>
+                <div class="w-full bg-gray-200 rounded-full h-4">
+                    <div id="progress-bar" class="bg-blue-500 h-4 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+                <p id="progress-label" class="text-center text-sm text-gray-600 mt-2">0 / 0 capítulos dominados (100%)</p>
+            </div>
+
+            <div id="chapter-navigation-section" class="hidden bg-white p-6 rounded-lg shadow-md mb-8">
+                 <div class="flex flex-wrap justify-between items-center mb-4 gap-4">
+                    <h2 class="text-xl font-semibold">Capítulos del Curso</h2>
+                    <div class="flex-shrink-0">
+                        <button id="api-key-button" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-full text-sm">Gestionar API Key</button>
+                        <button id="export-button" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-full text-sm">Exportar Avance</button>
+                        <button id="reset-button" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-full text-sm ml-2">Empezar de Nuevo</button>
+                    </div>
+                </div>
+                <div id="chapter-navigation" class="flex flex-wrap gap-2"></div>
+            </div>
+
+            <div id="upload-section" class="bg-white p-6 rounded-lg shadow-md mb-8">
+                <h2 class="text-xl font-semibold mb-4">Sube uno o más capítulos (.md)</h2>
+                <div class="flex flex-col sm:flex-row items-center gap-4">
+                    <input type="file" id="markdown-file" accept=".md" multiple class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                </div>
+            </div>
+            
+            <div id="import-section" class="text-center mb-8">
+                 <h2 class="text-lg font-semibold mb-4 text-gray-700">O...</h2>
+                 <input type="file" id="import-file-input" accept=".json" class="hidden"/>
+                 <label for="import-file-input" class="cursor-pointer text-blue-600 hover:text-blue-800 underline">Importa un curso existente (.json)</label>
+            </div>
+
+
+            <div id="document-viewer-section" class="hidden bg-white p-6 rounded-lg shadow-md mb-8">
+                <div class="flex justify-between items-center gap-4" id="toggle-document-header">
+                    <h2 id="document-title" class="text-xl font-semibold flex-grow">Contenido del Capítulo</h2>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                         <button id="translate-chapter-button" class="hidden bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-full text-sm">Traducir</button>
+                         <button id="toggle-document-button" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-full text-sm">Mostrar</button>
+                    </div>
+                </div>
+                <div id="document-content" class="hidden prose max-w-none mt-4 border-t pt-4"></div>
+            </div>
+            
+            <div id="loading-indicator" class="hidden flex-col items-center justify-center my-10">
+                <div class="loader"></div>
+                <p id="loading-text" class="mt-4 text-gray-600">Procesando...</p>
+            </div>
+            
+            <div id="generate-material-prompt" class="hidden text-center bg-white p-6 rounded-lg shadow-md my-8">
+                <h2 class="text-xl font-semibold mb-4">Herramientas de Aprendizaje</h2>
+                <p class="text-gray-600 mb-4">Haz clic para generar preguntas y fichas interactivas para este capítulo.</p>
+                <button id="generate-material-button" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-full">Generar Material de Estudio</button>
+            </div>
+
+
+            <div id="results-container" class="space-y-8">
+                <div id="mcq-section" class="hidden"><h2 class="text-2xl font-bold mb-4">📝 Preguntas con Alternativas</h2><div id="mcq-container" class="space-y-4"></div></div>
+                <div id="tf-section" class="hidden"><h2 class="text-2xl font-bold mb-4">✔️ o ❌ Verdadero y Falso</h2><div id="tf-container" class="space-y-4"></div></div>
+                <div id="quiz-controls" class="hidden text-center mt-8 space-x-4">
+                    <button id="check-answers-button" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-full">Comprobar Respuestas</button>
+                    <button id="retry-button" class="hidden bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-full">Intentar de Nuevo</button>
+                </div>
+                <div id="quiz-results-summary" class="hidden text-center mt-4 p-4 bg-gray-50 rounded-lg"></div>
+                <div id="new-questions-button-container" class="hidden text-center pt-4 border-t mt-8">
+                    <button id="generate-new-questions" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-full disabled:opacity-50 disabled:cursor-not-allowed">Generar Nuevas Preguntas</button>
+                </div>
+
+                <div id="flashcards-section" class="hidden">
+                    <div class="flex justify-between items-center pt-4 border-t mt-8 mb-4">
+                        <h2 class="text-2xl font-bold">📇 Fichas de Estudio</h2>
+                        <button id="start-flashcard-eval" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-full text-sm">Iniciar Autoevaluación</button>
+                    </div>
+                    <div id="flashcards-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4"></div>
+                </div>
+
+                <div id="new-flashcards-button-container" class="hidden text-center">
+                    <button id="generate-new-flashcards" class="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-6 rounded-full disabled:opacity-50 disabled:cursor-not-allowed">Generar Nuevas Fichas</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modals -->
+        <div id="split-options-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto p-6 overflow-y-auto max-h-screen">
+                <h3 class="text-xl font-bold mb-4">Añadir Archivo de Capítulo</h3>
+                <p id="split-modal-filename" class="text-sm text-gray-600 mb-4"></p>
+                <div class="space-y-4">
+                    <div>
+                        <button id="add-single-chapter-btn" class="w-full text-left p-3 border rounded-lg hover:bg-gray-100 transition-colors">
+                            <strong class="block">Añadir como un solo capítulo</strong>
+                            <span class="text-sm text-gray-500">El archivo completo se convertirá en un capítulo.</span>
+                        </button>
+                    </div>
+                    <div>
+                        <div class="p-3 border rounded-lg">
+                            <strong class="block mb-2">Dividir por Título Automático</strong>
+                            <span class="text-sm text-gray-500 block mb-3">Crea un capítulo por cada título del nivel que elijas.</span>
+                            <label for="split-level-select" class="sr-only">Dividir por nivel de título</label>
+                            <select id="split-level-select" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                <option value="1">H1 (# Título)</option>
+                                <option value="2" selected>H2 (## Título)</option>
+                                <option value="3">H3 (### Título)</option>
+                                <option value="4">H4 (#### Título)</option>
+                            </select>
+                            <button id="split-and-add-btn" class="w-full mt-3 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg">Dividir y Añadir</button>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="p-3 border rounded-lg">
+                            <strong class="block mb-2">Dividir Manualmente por Títulos</strong>
+                            <span class="text-sm text-gray-500 block mb-3">Pega los títulos exactos (uno por línea) que usarás como separadores.</span>
+                            <textarea id="manual-split-textarea" class="w-full p-2 border border-gray-300 rounded-lg h-24" placeholder="Título del Capítulo 1&#10;Título del Capítulo 2..."></textarea>
+                            <button id="manual-split-and-add-btn" class="w-full mt-3 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg">Dividir Manualmente y Añadir</button>
+                        </div>
+                    </div>
+                </div>
+                 <div class="text-right mt-6">
+                    <button id="cancel-split-btn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg">Cancelar</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="flashcard-evaluation-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto p-6 relative">
+                 <button id="exit-flashcard-eval" class="absolute top-2 right-4 text-2xl font-bold text-gray-500 hover:text-gray-800">&times;</button>
+                 <div id="flashcard-eval-content">
+                    <p id="flashcard-eval-progress" class="text-center text-sm text-gray-600 mb-4"></p>
+                    <div id="flashcard-eval-card-container" class="mx-auto w-64 h-40"></div>
+                    <div id="flashcard-eval-buttons" class="hidden mt-4 text-center space-x-4">
+                        <button id="eval-btn-review" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-full">❌ Necesito Repasar</button>
+                        <button id="eval-btn-known" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-full">✅ Lo sabía</button>
+                    </div>
+                 </div>
+                 <div id="flashcard-eval-summary" class="hidden text-center">
+                     <h3 class="text-xl font-bold mb-4">Resumen de Autoevaluación</h3>
+                     <div id="flashcard-summary-text" class="mb-4"></div>
+                     <button id="finish-flashcard-eval" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded-full">Finalizar</button>
+                 </div>
+            </div>
+        </div>
+        
+        <div id="reset-confirm-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto p-6 text-center">
+                <h3 class="text-xl font-bold mb-4">¿Estás seguro?</h3>
+                <p class="mb-6">Todo tu progreso actual se borrará y volverás a la pantalla de inicio. Esta acción no se puede deshacer.</p>
+                <div class="space-x-4">
+                    <button id="cancel-reset-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-full">Cancelar</button>
+                    <button id="confirm-reset-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-full">Sí, Empezar de Nuevo</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="delete-chapter-confirm-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-auto p-6 text-center">
+                <h3 class="text-xl font-bold mb-4">Eliminar Capítulo</h3>
+                <p class="mb-6">¿Estás seguro de que quieres eliminar este capítulo? Todo su contenido y progreso se perderán permanentemente.</p>
+                <div class="space-x-4">
+                    <button id="cancel-delete-chapter-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-full">Cancelar</button>
+                    <button id="confirm-delete-chapter-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-full">Sí, Eliminar</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="api-key-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-auto p-6 text-center">
+                <h3 class="text-xl font-bold mb-4">Configurar Clave de API de Gemini</h3>
+                <p class="mb-4 text-gray-600">Para acceder a las herramientas de aprendizaje, necesitas una clave de API de Google AI Studio. El plan gratuito es suficiente para esta aplicación.</p>
+                <input type="password" id="api-key-input" placeholder="Pega tu clave de API aquí..." class="w-full p-2 border border-gray-300 rounded-lg mb-4">
+                <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-500 hover:underline mb-4 block">Obtener una clave de API aquí</a>
+                <div class="space-x-4">
+                    <button id="cancel-api-key-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-full">Cancelar</button>
+                    <button id="save-api-key-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded-full">Guardar y Continuar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const importFileInput = document.getElementById('import-file-input');
+        const importSection = document.getElementById('import-section');
+        const mainApp = document.getElementById('main-app');
+        const mainHeader = document.getElementById('main-header');
+        const mainSubheader = document.getElementById('main-subheader');
+        const fileInput = document.getElementById('markdown-file');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const loadingText = document.getElementById('loading-text');
+        const documentViewerSection = document.getElementById('document-viewer-section');
+        const documentTitle = document.getElementById('document-title');
+        const toggleDocumentHeader = document.getElementById('toggle-document-header');
+        const toggleDocumentButton = document.getElementById('toggle-document-button');
+        const translateChapterButton = document.getElementById('translate-chapter-button');
+        const documentContentDiv = document.getElementById('document-content');
+        const chapterNavSection = document.getElementById('chapter-navigation-section');
+        const chapterNav = document.getElementById('chapter-navigation');
+        const exportButton = document.getElementById('export-button');
+        const resetButton = document.getElementById('reset-button');
+        const progressSection = document.getElementById('progress-section');
+        const progressBar = document.getElementById('progress-bar');
+        const progressLabel = document.getElementById('progress-label');
+        const generateMaterialPrompt = document.getElementById('generate-material-prompt');
+        const generateMaterialButton = document.getElementById('generate-material-button');
+        const mcqSection = document.getElementById('mcq-section');
+        const tfSection = document.getElementById('tf-section');
+        const flashcardsSection = document.getElementById('flashcards-section');
+        const mcqContainer = document.getElementById('mcq-container');
+        const tfContainer = document.getElementById('tf-container');
+        const flashcardsContainer = document.getElementById('flashcards-container');
+        const quizControls = document.getElementById('quiz-controls');
+        const checkAnswersButton = document.getElementById('check-answers-button');
+        const retryButton = document.getElementById('retry-button');
+        const quizResultsSummary = document.getElementById('quiz-results-summary');
+        const newQuestionsBtn = document.getElementById('generate-new-questions');
+        const newFlashcardsBtn = document.getElementById('generate-new-flashcards');
+        const newQuestionsContainer = document.getElementById('new-questions-button-container');
+        const newFlashcardsContainer = document.getElementById('new-flashcards-button-container');
+        const startFlashcardEvalBtn = document.getElementById('start-flashcard-eval');
+        const flashcardEvalModal = document.getElementById('flashcard-evaluation-modal');
+        const exitFlashcardEvalBtn = document.getElementById('exit-flashcard-eval');
+        const flashcardEvalContent = document.getElementById('flashcard-eval-content');
+        const flashcardEvalProgress = document.getElementById('flashcard-eval-progress');
+        const flashcardEvalCardContainer = document.getElementById('flashcard-eval-card-container');
+        const flashcardEvalButtons = document.getElementById('flashcard-eval-buttons');
+        const evalBtnReview = document.getElementById('eval-btn-review');
+        const evalBtnKnown = document.getElementById('eval-btn-known');
+        const flashcardEvalSummary = document.getElementById('flashcard-eval-summary');
+        const flashcardSummaryText = document.getElementById('flashcard-summary-text');
+        const finishFlashcardEvalBtn = document.getElementById('finish-flashcard-eval');
+        const resetConfirmModal = document.getElementById('reset-confirm-modal');
+        const confirmResetBtn = document.getElementById('confirm-reset-btn');
+        const cancelResetBtn = document.getElementById('cancel-reset-btn');
+        const apiKeyModal = document.getElementById('api-key-modal');
+        const apiKeyButton = document.getElementById('api-key-button');
+        const apiKeyInput = document.getElementById('api-key-input');
+        const saveApiKeyBtn = document.getElementById('save-api-key-btn');
+        const cancelApiKeyBtn = document.getElementById('cancel-api-key-btn');
+        const deleteChapterConfirmModal = document.getElementById('delete-chapter-confirm-modal');
+        const confirmDeleteChapterBtn = document.getElementById('confirm-delete-chapter-btn');
+        const cancelDeleteChapterBtn = document.getElementById('cancel-delete-chapter-btn');
+        
+        const splitOptionsModal = document.getElementById('split-options-modal');
+        const splitModalFilename = document.getElementById('split-modal-filename');
+        const addSingleChapterBtn = document.getElementById('add-single-chapter-btn');
+        const splitAndAddBtn = document.getElementById('split-and-add-btn');
+        const manualSplitAndAddBtn = document.getElementById('manual-split-and-add-btn');
+        const manualSplitTextarea = document.getElementById('manual-split-textarea');
+        const cancelSplitBtn = document.getElementById('cancel-split-btn');
+        const splitLevelSelect = document.getElementById('split-level-select');
+
+        // State
+        let courseTitle = '';
+        let courseData = [];
+        let currentChapterId = null;
+        let currentCardIndex = 0;
+        let apiKey = localStorage.getItem('gemini-api-key');
+        let apiCallQueue = null;
+        let chapterToDeleteId = null;
+        let fileToProcess = null;
+        let pendingFileAction = null; 
+
+        // --- App Initialization ---
+        importFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (!imported.title || !Array.isArray(imported.data)) throw new Error("Archivo inválido");
+                    initializeCourse(imported.title, imported.data);
+                } catch (err) {
+                    alert('Error al importar el archivo. Asegúrate de que es un archivo de curso válido.');
+                    console.error(err);
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        function initializeCourse(title, data) {
+            courseTitle = title;
+            courseData = data.map(chapter => ({
+                isGenerated: !!chapter.generatedMaterial,
+                ...chapter,
+                quizAttempt: chapter.quizAttempt || null,
+                progress: chapter.progress || { quiz: false, flashcards: false },
+                isTranslated: chapter.isTranslated || false
+            }));
+            mainHeader.textContent = `🧠 ${courseTitle}`;
+            mainSubheader.textContent = 'Sube un nuevo capítulo o repasa los existentes.';
+            importSection.classList.add('hidden');
+            document.getElementById('upload-section').classList.remove('mb-8');
+
+
+            if (courseData.length > 0) {
+                sortCourseData();
+                updateChapterNavigation();
+                displayChapter(courseData[0].id);
+                progressSection.classList.remove('hidden');
+                updateProgressBar();
+            }
+        }
+        
+        // --- File Input Handling ---
+        fileInput.addEventListener('change', async (event) => {
+            if (event.target.files.length === 0) return;
+            const files = Array.from(event.target.files);
+
+            if (!courseTitle && files.length > 0) {
+                try {
+                    loadingText.textContent = 'Creando curso...';
+                    loadingIndicator.classList.remove('hidden');
+                    loadingIndicator.classList.add('flex');
+                    const firstFileContent = await files[0].text();
+                    const newCourseTitle = extractMainTitleFromMarkdown(firstFileContent, files[0].name.replace(/\.md$/i, ''));
+                    initializeCourse(newCourseTitle, []);
+                } catch (e) {
+                    console.error("No se pudo crear el curso desde el archivo", e);
+                    alert("No se pudo leer el archivo para crear el curso.");
+                    loadingIndicator.classList.add('hidden');
+                    return;
+                } finally {
+                    loadingIndicator.classList.add('hidden');
+                }
+            }
+
+            pendingFileAction = async () => {
+                if (files.length > 1) {
+                    await processFilesAsSingleChapters(files);
+                } else {
+                    fileToProcess = files[0];
+                    splitModalFilename.textContent = `Archivo: ${fileToProcess.name}`;
+                    splitOptionsModal.classList.remove('hidden');
+                }
+            };
+
+            try {
+                await requestApiKey();
+                if (pendingFileAction) {
+                    setTimeout(() => {
+                        pendingFileAction();
+                    }, 150); 
+                }
+            } catch (error) {
+                console.log("Acción cancelada por falta de API key.", error);
+                fileInput.value = '';
+                pendingFileAction = null;
+            }
+        });
+        
+        addSingleChapterBtn.addEventListener('click', async () => {
+            if (fileToProcess) {
+                await processFilesAsSingleChapters([fileToProcess]);
+            }
+            closeSplitModal();
+        });
+
+        splitAndAddBtn.addEventListener('click', async () => {
+            if (fileToProcess) {
+                await splitAndProcessFile(fileToProcess, 'auto');
+            }
+            closeSplitModal();
+        });
+
+        manualSplitAndAddBtn.addEventListener('click', async () => {
+            if(fileToProcess) {
+                await splitAndProcessFile(fileToProcess, 'manual');
+            }
+            closeSplitModal();
+        });
+
+        cancelSplitBtn.addEventListener('click', closeSplitModal);
+
+        function closeSplitModal() {
+            splitOptionsModal.classList.add('hidden');
+            manualSplitTextarea.value = '';
+            fileToProcess = null;
+            fileInput.value = '';
+            pendingFileAction = null;
+        }
+        
+        async function splitAndProcessFile(file, mode) {
+            loadingIndicator.classList.remove('hidden');
+            loadingIndicator.classList.add('flex');
+            
+            try {
+                loadingText.textContent = 'Dividiendo archivo...';
+                const originalContent = await file.text();
+                let sections = [];
+
+                if (mode === 'auto') {
+                    const level = parseInt(splitLevelSelect.value, 10);
+                    const processedOriginalContent = preprocessAsposeMarkdown(originalContent);
+                    sections = splitMarkdown(processedOriginalContent, level);
+                } else if (mode === 'manual') {
+                    const manualTitles = manualSplitTextarea.value.split('\n').map(t => t.trim()).filter(Boolean);
+                    if (manualTitles.length === 0) {
+                        alert("Por favor, introduce al menos un título para la división manual.");
+                        return;
+                    }
+                    sections = splitMarkdownManually(originalContent, manualTitles);
+                }
+
+                if (sections.length === 0) {
+                    loadingText.textContent = 'No se encontraron secciones. Procesando como un solo capítulo...';
+                    await processFilesAsSingleChapters([file]);
+                    return;
+                }
+                
+                const newChapters = [];
+                sections.forEach((section, i) => {
+                    const originalTitleText = section.title.replace(/^#+\s*/, '').trim();
+                    const numberedTitle = `${i + 1}. ${originalTitleText}`;
+                    
+                    if (!courseData.some(c => c.title === numberedTitle)) {
+                        const chapterId = `${numberedTitle.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}-${i}`;
+                        const finalContent = `## ${numberedTitle}\n\n${section.content}`;
+
+                        const newChapter = {
+                            id: chapterId,
+                            title: numberedTitle,
+                            markdownContent: finalContent,
+                            generatedMaterial: null, isGenerated: false, progress: { quiz: false, flashcards: false }, quizAttempt: null, isTranslated: false
+                        };
+                        courseData.push(newChapter);
+                        newChapters.push(newChapter);
+                    }
+                });
+
+                if (newChapters.length > 0) {
+                    sortCourseData();
+                    updateChapterNavigation();
+                    displayChapter(newChapters[0].id);
+                    progressSection.classList.remove('hidden');
+                    updateProgressBar();
+                }
+            } catch (error) {
+                 console.error("Error al dividir y procesar:", error);
+                 alert("Hubo un error en la división. Revisa la consola.");
+            } finally {
+                 loadingIndicator.classList.add('hidden');
+                 loadingText.textContent = 'Procesando...';
+            }
+        }
+        
+        async function processFilesAsSingleChapters(files) {
+            fileInput.disabled = true;
+            loadingIndicator.classList.remove('hidden');
+            loadingIndicator.classList.add('flex');
+
+            try {
+                let firstNewChapterId = null;
+                for (const file of files) {
+                    loadingText.textContent = `Añadiendo ${file.name}...`;
+                    const markdownContent = await file.text();
+                    const chapterId = file.name.replace(/[^a-zA-Z0-9]/g, '-');
+                    
+                    if (!courseData.some(c => c.id === chapterId)) {
+                        if (!firstNewChapterId) firstNewChapterId = chapterId;
+                        const newChapter = {
+                            id: chapterId,
+                            title: extractTitleFromMarkdown(markdownContent, file.name),
+                            markdownContent: markdownContent,
+                            generatedMaterial: null, isGenerated: false, progress: { quiz: false, flashcards: false }, quizAttempt: null, isTranslated: false
+                        };
+                        courseData.push(newChapter);
+                    }
+                }
+                sortCourseData();
+                updateChapterNavigation();
+                
+                if (firstNewChapterId) {
+                    displayChapter(courseData.find(c => c.id === firstNewChapterId).id);
+                } else if (courseData.length > 0 && !currentChapterId) {
+                    displayChapter(courseData[0].id);
+                }
+
+                progressSection.classList.remove('hidden');
+                updateProgressBar();
+            } catch (error) {
+                console.error("Error procesando archivos:", error);
+                alert("Hubo un error al procesar los archivos.");
+            } finally {
+                fileInput.disabled = false;
+                fileInput.value = '';
+                loadingIndicator.classList.add('hidden');
+                loadingText.textContent = 'Procesando...';
+            }
+        }
+
+        function preprocessAsposeMarkdown(text) {
+            let processedText = text;
+            processedText = processedText.replace(/^\s*\*\*(.*)\*\*\s*$/gm, '## $1');
+            processedText = processedText.replace(/^\d+\s\s\*\*(.*)\*\*/gm, '## $1');
+            processedText = processedText.replace(/^\d+\.\s(.*)/gm, '### $1');
+            return processedText;
+        }
+
+        function splitMarkdown(text, level) {
+            const headerRegex = new RegExp(`(^|\\n)(#{${level}}\\s+.*)`);
+            const parts = text.split(headerRegex).filter(p => p && p.trim() !== '');
+
+            const sections = [];
+            if (parts.length === 0) return sections;
+            
+            if (!parts[0].startsWith('#'.repeat(level) + ' ')) {
+                sections.push({ title: `(Sección Inicial)`, content: parts.shift().trim() });
+            }
+            
+            for (let i = 0; i < parts.length; i += 2) {
+                sections.push({ title: parts[i].trim(), content: (parts[i + 1] || '').trim() });
+            }
+            
+            return sections.filter(s => s.title || s.content);
+        }
+
+        function splitMarkdownManually(text, titles) {
+            const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`(${titles.map(escapeRegex).join('|')})`, 'g');
+            const parts = text.split(regex);
+            
+            const sections = [];
+            if (parts.length <= 1) return sections;
+
+            let contentBuffer = parts[0].trim();
+            for (let i = 1; i < parts.length; i += 2) {
+                const title = parts[i];
+                const nextContent = parts[i + 1] || '';
+                
+                if (contentBuffer) {
+                    sections.push({ title: title, content: contentBuffer });
+                    contentBuffer = nextContent.trim();
+                } else {
+                     sections.push({ title: title, content: nextContent.trim() });
+                     contentBuffer = '';
+                }
+            }
+
+            // A slightly different approach is needed here.
+            // Split keeps the delimiter.
+            // Let's find indices instead.
+            
+            let lastIndex = 0;
+            const foundSections = [];
+            titles.forEach(title => {
+                const index = text.indexOf(title, lastIndex);
+                if (index !== -1) {
+                    foundSections.push({title: title, index: index});
+                }
+            });
+
+            if (foundSections.length === 0) return [];
+            
+            // Sort by index to maintain document order
+            foundSections.sort((a,b) => a.index - b.index);
+
+            const finalSections = [];
+            for(let i=0; i < foundSections.length; i++) {
+                const start = foundSections[i].index + foundSections[i].title.length;
+                const end = i + 1 < foundSections.length ? foundSections[i+1].index : text.length;
+                finalSections.push({
+                    title: foundSections[i].title.trim(),
+                    content: text.substring(start, end).trim()
+                });
+            }
+            
+            return finalSections;
+        }
+
+
+        // --- Translation Logic ---
+        translateChapterButton.addEventListener('click', handleTranslateChapter);
+
+        async function handleTranslateChapter() {
+            if (!currentChapterId) return;
+            const chapter = courseData.find(c => c.id === currentChapterId);
+            if (!chapter || chapter.isTranslated) return;
+
+            loadingText.textContent = `Traduciendo "${chapter.title}"...`;
+            loadingIndicator.classList.remove('hidden');
+            loadingIndicator.classList.add('flex');
+            translateChapterButton.disabled = true;
+
+            try {
+                const translatedContent = await callGeminiForChapterTranslation(chapter.markdownContent);
+                chapter.markdownContent = translatedContent;
+                chapter.isTranslated = true;
+                chapter.title = extractTitleFromMarkdown(translatedContent, chapter.title);
+                
+                sortCourseData(); 
+                displayChapter(chapter.id); 
+
+            } catch (error) {
+                console.error("Error during translation:", error);
+                alert("Hubo un error al traducir el capítulo. Revisa la consola.");
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                translateChapterButton.disabled = false;
+            }
+        }
+
+        async function callGeminiForChapterTranslation(text) {
+            await requestApiKey();
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+            const prompt = `Translate the following Markdown text to Spanish. CRITICAL: You MUST preserve all original Markdown formatting perfectly. Do NOT alter any part of image links like '![](figuras/Aspose.Words.xyz.jpeg)'. Only translate the text content around the formatting.
+            
+            Text to translate:
+            ---
+            ${text}
+            ---`;
+            
+            const payload = { contents: [{ parts: [{ text: prompt }] }] };
+            const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!response.ok) throw new Error(`API Error during translation: ${response.statusText}`);
+            const result = await response.json();
+            return result.candidates?.[0]?.content?.parts?.[0]?.text || text;
+        }
+
+
+        // --- API Calls ---
+        async function callGeminiAPI(text, type = 'all') {
+             await requestApiKey();
+             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+             const prompt = `Basado en el siguiente texto, genera material de estudio. Si el texto está en inglés, genera el material en inglés. Si está en español, genera el material en español. La salida DEBE SER un objeto JSON válido, sin texto adicional. La estructura es: {"preguntasAlternativas": [{"pregunta":"...","opciones":["..."],"respuestaCorrecta":"...","explicacion":"..."}],"preguntasVF": [{"pregunta":"...","respuestaCorrecta":true,"explicacion":"..."}],"fichas": [{"frente":"...","dorso":"..."}]}. ${type === 'questions' ? 'Genera 5 preguntas de alternativas y 5 de Verdadero y Falso. "fichas" debe ser [].' : type === 'flashcards' ? 'Genera 8 fichas. "preguntasAlternativas" y "preguntasVF" deben ser [].' : 'Genera 5 preguntas de alternativas, 5 de Verdadero y Falso y 8 fichas.'} Texto del capítulo: --- ${text} ---`;
+             const payload = { contents: [{ parts: [{ text: prompt }] }] };
+             const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+             if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+             const result = await response.json();
+             const jsonString = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
+             const cleanedJsonString = jsonString.replace(/```json/g, '').replace(/```/g, '').trim();
+             return JSON.parse(cleanedJsonString);
+        }
+
+        // --- The rest of the JS code for UI, Quiz, Flashcards, etc. ---
+        
+        generateMaterialButton.addEventListener('click', async () => {
+            const chapter = courseData.find(c => c.id === currentChapterId);
+            if (!chapter || chapter.isGenerated) return;
+
+            loadingText.textContent = 'Gemini está estudiando tu documento...';
+            loadingIndicator.classList.remove('hidden');
+            loadingIndicator.classList.add('flex');
+            generateMaterialPrompt.classList.add('hidden');
+
+            try {
+                const generatedMaterial = await callGeminiAPI(chapter.markdownContent);
+                if (generatedMaterial.fichas) {
+                    generatedMaterial.fichas.forEach(f => f.mastery = null);
+                }
+                chapter.generatedMaterial = generatedMaterial;
+                chapter.isGenerated = true;
+                displayChapter(chapter.id);
+            } catch (error) {
+                console.error('Error al generar y guardar el capítulo:', error);
+                if (error.message !== 'API key request cancelled') {
+                    alert('Hubo un error al generar el material. Revisa la consola.');
+                }
+                generateMaterialPrompt.classList.remove('hidden');
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                loadingText.textContent = 'Procesando...';
+            }
+        });
+
+        async function displayChapter(chapterId) {
+            currentChapterId = chapterId;
+            const chapter = courseData.find(c => c.id === chapterId);
+            if (!chapter) return;
+            
+            updateChapterNavigation();
+            hideAllMaterialSections();
+
+            documentTitle.textContent = chapter.title;
+
+            if (chapter.isTranslated) {
+                translateChapterButton.classList.add('hidden');
+            } else {
+                translateChapterButton.classList.remove('hidden');
+            }
+
+            const converter = new showdown.Converter({ tables: true, strikethrough: true, tasklists: true, simpleLineBreaks: true });
+            if (converter.setFlavor) converter.setFlavor('github');
+            converter.setOption('tables', true);
+            documentContentDiv.innerHTML = converter.makeHtml(chapter.markdownContent);
+            documentViewerSection.classList.remove('hidden');
+
+            if (chapter.isGenerated) {
+                generateMaterialPrompt.classList.add('hidden');
+                const { preguntasAlternativas, preguntasVF, fichas } = chapter.generatedMaterial;
+                displayMCQ(preguntasAlternativas);
+                displayTF(preguntasVF);
+                displayFlashcards(fichas);
+
+                mcqSection.classList.toggle('hidden', !preguntasAlternativas || preguntasAlternativas.length === 0);
+                tfSection.classList.toggle('hidden', !preguntasVF || preguntasVF.length === 0);
+                flashcardsSection.classList.toggle('hidden', !fichas || fichas.length === 0);
+                newQuestionsContainer.classList.remove('hidden');
+                newFlashcardsContainer.classList.remove('hidden');
+                
+                if (chapter.quizAttempt) {
+                    showQuizResults(chapter);
+                } else {
+                    quizControls.classList.toggle('hidden', (!preguntasAlternativas || preguntasAlternativas.length === 0) && (!preguntasVF || preguntasVF.length === 0));
+                    quizResultsSummary.classList.add('hidden');
+                    retryButton.classList.add('hidden');
+                    checkAnswersButton.classList.remove('hidden');
+                }
+            } else {
+                generateMaterialPrompt.classList.remove('hidden');
+            }
+        }
+        
+        checkAnswersButton.addEventListener('click', checkAnswers);
+        retryButton.addEventListener('click', retryQuiz);
+        newQuestionsBtn.addEventListener('click', async () => await regenerateContent('questions'));
+        newFlashcardsBtn.addEventListener('click', async () => await regenerateContent('flashcards'));
+
+        startFlashcardEvalBtn.addEventListener('click', () => {
+            const chapter = courseData.find(c => c.id === currentChapterId);
+            if (!chapter || !chapter.generatedMaterial.fichas || chapter.generatedMaterial.fichas.length === 0) {
+                alert("No hay fichas para evaluar en este capítulo.");
+                return;
+            }
+            currentCardIndex = 0;
+            flashcardEvalContent.classList.remove('hidden');
+            flashcardEvalSummary.classList.add('hidden');
+            flashcardEvalModal.classList.remove('hidden');
+            displayEvaluationCard();
+        });
+
+        function displayEvaluationCard() {
+            const chapter = courseData.find(c => c.id === currentChapterId);
+            const cardData = chapter.generatedMaterial.fichas[currentCardIndex];
+            flashcardEvalProgress.textContent = `Ficha ${currentCardIndex + 1} de ${chapter.generatedMaterial.fichas.length}`;
+            
+            const cardEl = createFlashcardElement(cardData);
+            flashcardEvalCardContainer.innerHTML = '';
+            flashcardEvalCardContainer.appendChild(cardEl);
+
+            let flipped = false;
+            cardEl.addEventListener('click', () => {
+                flipped = !flipped;
+                cardEl.classList.toggle('is-flipped');
+                flashcardEvalButtons.classList.toggle('hidden', !flipped);
+            });
+        }
+
+        evalBtnKnown.addEventListener('click', () => recordMastery('known'));
+        evalBtnReview.addEventListener('click', () => recordMastery('review'));
+
+        function recordMastery(status) {
+            const chapter = courseData.find(c => c.id === currentChapterId);
+            chapter.generatedMaterial.fichas[currentCardIndex].mastery = status;
+            currentCardIndex++;
+            if (currentCardIndex < chapter.generatedMaterial.fichas.length) {
+                displayEvaluationCard();
+            } else {
+                showEvaluationSummary();
+            }
+        }
+        
+        function showEvaluationSummary() {
+            const chapter = courseData.find(c => c.id === currentChapterId);
+            const knownCount = chapter.generatedMaterial.fichas.filter(f => f.mastery === 'known').length;
+            const reviewCount = chapter.generatedMaterial.fichas.filter(f => f.mastery === 'review').length;
+            
+            if (knownCount >= (chapter.generatedMaterial.fichas.length * 0.8) && knownCount > 0) {
+                chapter.progress.flashcards = true;
+            }
+            updateProgressBar();
+
+            let summaryHtml = `<p>Has dominado <span class="font-semibold">${knownCount}</span> fichas y necesitas repasar <span class="font-semibold">${reviewCount}</span>.</p>`;
+
+            if (chapter.progress.flashcards) {
+                summaryHtml += `<p class="mt-2 text-green-600 font-semibold">¡Muy bien! Has dominado este tema.</p>`;
+            } else {
+                summaryHtml += `<p class="mt-2 text-amber-600 font-semibold">¡Sigue repasando! Necesitas dominar al menos el 80% de las fichas.</p>`;
+            }
+
+            flashcardSummaryText.innerHTML = summaryHtml;
+            flashcardEvalContent.classList.add('hidden');
+            flashcardEvalSummary.classList.remove('hidden');
+        }
+
+        exitFlashcardEvalBtn.addEventListener('click', exitFlashcardEvaluation);
+        finishFlashcardEvalBtn.addEventListener('click', exitFlashcardEvaluation);
+
+        function exitFlashcardEvaluation() {
+            flashcardEvalModal.classList.add('hidden');
+            const chapter = courseData.find(c => c.id === currentChapterId);
+            if (chapter) {
+                displayFlashcards(chapter.generatedMaterial.fichas);
+            }
+        }
+        
+        function sortCourseData() {
+            const getSortNumber = (title) => {
+                const match = title.match(/^(\d+)/);
+                return match ? parseInt(match[1], 10) : Infinity;
+            };
+            courseData.sort((a, b) => {
+                const numA = getSortNumber(a.title);
+                const numB = getSortNumber(b.title);
+                if (numA !== numB) return numA - numB;
+                return a.title.localeCompare(b.title);
+            });
+        }
+        
+        function updateChapterNavigation() {
+            chapterNav.innerHTML = '';
+            courseData.forEach(chapter => {
+                const container = document.createElement('div');
+                container.className = 'flex items-center group';
+
+                const button = document.createElement('button');
+                button.textContent = chapter.title;
+                button.dataset.chapterId = chapter.id;
+                button.className = `chapter-btn py-2 px-4 rounded-l-full text-sm font-semibold transition-colors duration-200 ${chapter.id === currentChapterId ? 'active' : 'bg-gray-200 hover:bg-gray-300'}`;
+                button.addEventListener('click', () => displayChapter(chapter.id));
+                
+                const deleteBtn = document.createElement('button');
+                deleteBtn.innerHTML = '&times;';
+                deleteBtn.dataset.chapterId = chapter.id;
+                deleteBtn.className = `delete-chapter-btn py-2 px-3 rounded-r-full text-sm font-bold transition-colors duration-200 ${chapter.id === currentChapterId ? 'active bg-blue-700 hover:bg-red-600 text-white' : 'bg-gray-300 hover:bg-red-500 text-gray-700 hover:text-white'}`;
+                deleteBtn.title = `Eliminar capítulo: ${chapter.title}`;
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    chapterToDeleteId = e.currentTarget.dataset.chapterId;
+                    deleteChapterConfirmModal.classList.remove('hidden');
+                });
+                
+                container.appendChild(button);
+                container.appendChild(deleteBtn);
+                chapterNav.appendChild(container);
+            });
+            chapterNavSection.classList.remove('hidden');
+        }
+
+        toggleDocumentHeader.addEventListener('click', () => {
+            const isHidden = documentContentDiv.classList.toggle('hidden');
+            toggleDocumentButton.textContent = isHidden ? 'Mostrar' : 'Ocultar';
+        });
+        
+        function hideAllMaterialSections() {
+            [mcqSection, tfSection, flashcardsSection, quizControls, newQuestionsContainer, newFlashcardsContainer, quizResultsSummary, generateMaterialPrompt].forEach(el => el.classList.add('hidden'));
+        }
+
+        exportButton.addEventListener('click', () => {
+            if (courseData.length === 0) { alert("No hay nada que exportar todavía."); return; }
+            const dataStr = JSON.stringify({ title: courseTitle, data: courseData });
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            const exportFileDefaultName = `${courseTitle.replace(/\s+/g, '_')}_curso.json`;
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            linkElement.click();
+        });
+
+        resetButton.addEventListener('click', () => {
+            resetConfirmModal.classList.remove('hidden');
+        });
+        cancelResetBtn.addEventListener('click', () => {
+            resetConfirmModal.classList.add('hidden');
+        });
+        confirmResetBtn.addEventListener('click', () => {
+            resetApp();
+        });
+
+        function resetApp(){
+            courseTitle = '';
+            courseData = [];
+            currentChapterId = null;
+            
+            mainHeader.textContent = '🧠 Generador de Material de Estudio';
+            mainSubheader.textContent = 'Sube tu primer capítulo para empezar un nuevo curso.';
+            
+            hideAllMaterialSections();
+            chapterNavSection.classList.add('hidden');
+            progressSection.classList.add('hidden');
+            documentViewerSection.classList.add('hidden');
+            documentContentDiv.classList.add('hidden');
+            documentContentDiv.innerHTML = '';
+            documentTitle.textContent = 'Contenido del Capítulo';
+            
+            importSection.classList.remove('hidden');
+            document.getElementById('upload-section').classList.add('mb-8');
+
+            resetConfirmModal.classList.add('hidden');
+        }
+
+        cancelDeleteChapterBtn.addEventListener('click', () => {
+            deleteChapterConfirmModal.classList.add('hidden');
+            chapterToDeleteId = null;
+        });
+
+        confirmDeleteChapterBtn.addEventListener('click', () => {
+            if (chapterToDeleteId) {
+                deleteChapter(chapterToDeleteId);
+            }
+            deleteChapterConfirmModal.classList.add('hidden');
+            chapterToDeleteId = null;
+        });
+
+        function deleteChapter(chapterId) {
+            courseData = courseData.filter(c => c.id !== chapterId);
+
+            if (courseData.length === 0) {
+                 resetApp();
+            } else {
+                if (currentChapterId === chapterId) {
+                    displayChapter(courseData[0].id);
+                } else {
+                    updateChapterNavigation();
+                }
+            }
+             updateProgressBar();
+        }
+        
+        function updateProgressBar() {
+            if (courseData.length === 0) {
+                progressSection.classList.add('hidden');
+                return;
+            }
+            
+            let totalProgress = 0;
+            courseData.forEach(chapter => {
+                let chapterProgress = 0;
+                if (chapter.progress.quiz) chapterProgress += 50;
+                if (chapter.progress.flashcards) chapterProgress += 50;
+                totalProgress += chapterProgress;
+            });
+
+            const averagePercentage = totalProgress / courseData.length;
+            const completedChapters = courseData.filter(c => c.progress.quiz && c.progress.flashcards).length;
+
+            progressBar.style.width = `${averagePercentage}%`;
+            progressLabel.textContent = `${completedChapters} / ${courseData.length} capítulos dominados`;
+        }
+
+        apiKeyButton.addEventListener('click', () => requestApiKey(true));
+        
+        cancelApiKeyBtn.addEventListener('click', () => {
+            apiKeyModal.classList.add('hidden');
+            if (apiCallQueue) {
+                apiCallQueue.reject('API key request cancelled');
+                apiCallQueue = null;
+            }
+            pendingFileAction = null; 
+        });
+
+        saveApiKeyBtn.addEventListener('click', () => {
+            const key = apiKeyInput.value.trim();
+            if (!key) {
+                alert("Por favor, introduce una clave de API.");
+                return;
+            }
+            apiKey = key;
+            localStorage.setItem('gemini-api-key', key);
+            apiKeyModal.classList.add('hidden');
+            if (apiCallQueue) {
+                apiCallQueue.resolve(key);
+                apiCallQueue = null;
+            }
+        });
+
+        function requestApiKey(force = false) {
+            return new Promise((resolve, reject) => {
+                if (apiKey && !force) {
+                    return resolve(apiKey);
+                }
+                
+                apiKeyInput.value = apiKey || '';
+                apiKeyModal.classList.remove('hidden');
+                
+                apiCallQueue = { resolve, reject };
+            });
+        }
+        
+        function displayMCQ(questions) {
+            mcqContainer.innerHTML = '';
+            if (!questions || questions.length === 0) return;
+            questions.forEach((q, index) => {
+                const questionEl = document.createElement('div');
+                questionEl.className = 'p-4 bg-gray-50 rounded-lg border border-gray-200';
+                questionEl.id = `mcq-question-${index}`;
+                let optionsHtml = q.opciones.map(opt => `<div class="mt-1"><label class="flex items-center p-2 rounded-md hover:bg-gray-200 cursor-pointer"><input type="radio" name="mcq-${index}" value="${opt}" class="mr-3"><span>${opt}</span></label></div>`).join('');
+                questionEl.innerHTML = `<p class="font-semibold mb-2">${index + 1}. ${q.pregunta}</p><div class="space-y-1">${optionsHtml}</div><div class="explanation hidden mt-2"></div>`;
+                mcqContainer.appendChild(questionEl);
+            });
+        }
+        
+        function displayTF(questions) {
+            tfContainer.innerHTML = '';
+            if (!questions || questions.length === 0) return;
+            questions.forEach((q, index) => {
+                const questionEl = document.createElement('div');
+                questionEl.className = 'p-4 bg-gray-50 rounded-lg border border-gray-200';
+                questionEl.id = `tf-question-${index}`;
+                questionEl.innerHTML = `<p class="font-semibold mb-2">${index + 1}. ${q.pregunta}</p><div class="flex gap-4"><label class="flex items-center p-2 rounded-md hover:bg-gray-200 cursor-pointer"><input type="radio" name="tf-${index}" value="true" class="mr-2"><span>Verdadero</span></label><label class="flex items-center p-2 rounded-md hover:bg-gray-200 cursor-pointer"><input type="radio" name="tf-${index}" value="false" class="mr-2"><span>Falso</span></label></div><div class="explanation hidden mt-2"></div>`;
+                tfContainer.appendChild(questionEl);
+            });
+        }
+        
+        function checkAnswers() {
+            const chapter = courseData.find(c => c.id === currentChapterId);
+            if (!chapter) return;
+
+            chapter.quizAttempt = { mcq: [], tf: [] };
+            chapter.generatedMaterial.preguntasAlternativas.forEach((q, i) => {
+                const selected = document.querySelector(`input[name="mcq-${i}"]:checked`);
+                chapter.quizAttempt.mcq[i] = selected ? selected.value : null;
+            });
+            chapter.generatedMaterial.preguntasVF.forEach((q, i) => {
+                const selected = document.querySelector(`input[name="tf-${i}"]:checked`);
+                chapter.quizAttempt.tf[i] = selected ? selected.value : null;
+            });
+
+            showQuizResults(chapter);
+        }
+
+        function showQuizResults(chapter) {
+            const { preguntasAlternativas, preguntasVF } = chapter.generatedMaterial;
+            const userAnswers = chapter.quizAttempt;
+
+            let mcqScore = 0, tfScore = 0;
+            
+            preguntasAlternativas.forEach((q, i) => {
+                if (userAnswers.mcq[i] === q.respuestaCorrecta) mcqScore++;
+            });
+            preguntasVF.forEach((q, i) => {
+                if (userAnswers.tf[i] === String(q.respuestaCorrecta)) tfScore++;
+            });
+            
+            const totalScore = mcqScore + tfScore;
+            const totalQuestions = preguntasAlternativas.length + preguntasVF.length;
+            
+            if (totalQuestions > 0 && (totalScore / totalQuestions) >= 0.8) {
+                chapter.progress.quiz = true;
+            }
+            updateProgressBar();
+
+            let summaryHtml = `<p class="font-bold text-lg">Resultados:</p><p>Alternativas: <span class="font-semibold">${mcqScore} / ${preguntasAlternativas.length}</span></p><p>Verdadero y Falso: <span class="font-semibold">${tfScore} / ${preguntasVF.length}</span></p>`;
+
+            if (chapter.progress.quiz) {
+                summaryHtml += `<p class="mt-2 text-green-600 font-semibold">¡Excelente! Has desbloqueado las explicaciones.</p>`;
+                preguntasAlternativas.forEach((q, i) => {
+                    const el = document.getElementById(`mcq-question-${i}`);
+                    if(userAnswers.mcq[i]) {
+                        const selectedInput = el.querySelector(`input[value="${CSS.escape(userAnswers.mcq[i])}"]`);
+                        if(selectedInput) selectedInput.parentElement.classList.add(userAnswers.mcq[i] === q.respuestaCorrecta ? 'correct-answer' : 'incorrect-answer');
+                    }
+                    if(userAnswers.mcq[i] !== q.respuestaCorrecta) el.querySelector(`input[value="${CSS.escape(q.respuestaCorrecta)}"]`)?.parentElement.classList.add('correct-answer');
+                    el.querySelector('.explanation').textContent = `Explicación: ${q.explicacion}`;
+                    el.querySelector('.explanation').classList.remove('hidden');
+                });
+                preguntasVF.forEach((q, i) => {
+                    const el = document.getElementById(`tf-question-${i}`);
+                     if(userAnswers.tf[i] !== null) {
+                        const selectedInput = el.querySelector(`input[value="${userAnswers.tf[i]}"]`);
+                        if(selectedInput) selectedInput.parentElement.classList.add(userAnswers.tf[i] === String(q.respuestaCorrecta) ? 'correct-answer' : 'incorrect-answer');
+                    }
+                    if(userAnswers.tf[i] !== String(q.respuestaCorrecta)) el.querySelector(`input[value="${String(q.respuestaCorrecta)}"]`)?.parentElement.classList.add('correct-answer');
+                    el.querySelector('.explanation').textContent = `Explicación: ${q.explicacion}`;
+                    el.querySelector('.explanation').classList.remove('hidden');
+                });
+            } else {
+                summaryHtml += `<p class="mt-2 text-red-600 font-semibold">Necesitas 80% o más de aciertos para ver las explicaciones. ¡Intenta de nuevo!</p>`;
+            }
+
+            preguntasAlternativas.forEach((q, i) => {
+                if (userAnswers.mcq[i]) {
+                    const input = document.querySelector(`input[name="mcq-${i}"][value="${CSS.escape(userAnswers.mcq[i])}"]`);
+                    if (input) input.checked = true;
+                }
+            });
+            preguntasVF.forEach((q, i) => {
+                if (userAnswers.tf[i] !== null) {
+                    const input = document.querySelector(`input[name="tf-${i}"][value="${userAnswers.tf[i]}"]`);
+                    if (input) input.checked = true;
+                }
+            });
+            document.querySelectorAll('#mcq-container input, #tf-container input').forEach(input => input.disabled = true);
+            
+            quizResultsSummary.innerHTML = summaryHtml;
+            quizResultsSummary.classList.remove('hidden');
+            quizControls.classList.remove('hidden');
+            checkAnswersButton.classList.add('hidden');
+            retryButton.classList.remove('hidden');
+        }
+
+        function retryQuiz() {
+            const chapter = courseData.find(c => c.id === currentChapterId);
+            if (!chapter) return;
+            chapter.quizAttempt = null;
+            chapter.progress.quiz = false;
+            updateProgressBar();
+            displayChapter(currentChapterId);
+        }
+
+        function displayFlashcards(cards) {
+            flashcardsContainer.innerHTML = '';
+            if (!cards || cards.length === 0) return;
+            cards.forEach(cardData => {
+                const cardEl = createFlashcardElement(cardData);
+                flashcardsContainer.appendChild(cardEl);
+            });
+        }
+        
+        function createFlashcardElement(cardData) {
+            const cardEl = document.createElement('div');
+            cardEl.className = 'flashcard h-40 cursor-pointer';
+            
+            if (cardData.mastery === 'known') {
+                cardEl.style.border = '3px solid #22c55e';
+            } else if (cardData.mastery === 'review') {
+                cardEl.style.border = '3px solid #ef4444';
+            }
+            cardEl.style.borderRadius = '0.5rem';
+
+            cardEl.innerHTML = `<div class="flashcard-inner"><div class="flashcard-face flashcard-front">${cardData.frente}</div><div class="flashcard-face flashcard-back">${cardData.dorso}</div></div>`;
+            
+            const flipHandler = (e) => {
+                if (!e.currentTarget.closest('#flashcard-eval-card-container')) {
+                    cardEl.classList.toggle('is-flipped');
+                }
+            };
+            cardEl.addEventListener('click', flipHandler);
+            
+            return cardEl;
+        }
+        
+        function extractMainTitleFromMarkdown(mdText, fallback) {
+            let match = mdText.match(/^#\s+(.*)/m);
+            if (match) return match[1].trim();
+
+            const lines = mdText.split('\n');
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (trimmedLine) {
+                    match = trimmedLine.match(/^\*\*(.*)\*\*$/);
+                    if (match) return match[1].trim();
+                    break; 
+                }
+            }
+            
+            return fallback;
+        }
+
+        function extractTitleFromMarkdown(mdText, fallback) {
+            const match = mdText.match(/^#+\s+(.*)/m);
+            return match ? match[1].trim() : fallback.replace(/\.md$/i, '');
+        }
+
+        async function regenerateContent(type) {
+            if (!currentChapterId) return;
+            const chapter = courseData.find(c => c.id === currentChapterId);
+            const button = type === 'questions' ? newQuestionsBtn : newFlashcardsBtn;
+            const originalText = button.textContent;
+            button.textContent = 'Generando...';
+            button.disabled = true;
+            
+            loadingText.textContent = 'Gemini está creando nuevo material...';
+            loadingIndicator.classList.remove('hidden');
+            loadingIndicator.classList.add('flex');
+            hideAllMaterialSections();
+
+            try {
+                if (type === 'questions') {
+                    chapter.progress.quiz = false;
+                    chapter.quizAttempt = null;
+                } else if (type === 'flashcards') {
+                    chapter.progress.flashcards = false;
+                }
+                updateProgressBar();
+
+                const response = await callGeminiAPI(chapter.markdownContent, type);
+                if (type === 'questions') {
+                    chapter.generatedMaterial.preguntasAlternativas = response.preguntasAlternativas;
+                    chapter.generatedMaterial.preguntasVF = response.preguntasVF;
+                } else if (type === 'flashcards') {
+                    if (response.fichas) {
+                       response.fichas.forEach(f => f.mastery = null);
+                    }
+                    chapter.generatedMaterial.fichas = response.fichas;
+                }
+                displayChapter(currentChapterId);
+            } catch (error) {
+                console.error('Error regenerando contenido:', error);
+                if (error.message !== 'API key request cancelled') {
+                    alert('Hubo un error al regenerar el contenido.');
+                }
+            } finally {
+                button.textContent = originalText;
+                button.disabled = false;
+                loadingIndicator.classList.add('hidden');
+                loadingText.textContent = 'Procesando...';
+            }
+        }
+    </script>
+</body>
+</html>
